@@ -1,0 +1,36 @@
+# Local Python environments and caches
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.cache/
+
+# Raw recordings and generated datasets
+/datas/
+/datasets/
+/processed*/
+*.mcap
+*.bag
+*.db3
+
+# Training checkpoints and exported models
+/checkpoint-*/
+/checkpoints/
+/exports/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.onnx.data
+
+# Packaged datasets, checkpoints, and exports
+*.tar
+*.tar.gz
+*.tgz
+*.tar.xz
+*.tar.zst
+*.zip
