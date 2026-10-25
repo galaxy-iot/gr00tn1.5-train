@@ -3,9 +3,9 @@
 import argparse
 import json
 from pathlib import Path
-import sys
 
 from export_onnx import register_config
+from quantization_samples import run_quantization
 
 
 def main():
@@ -16,6 +16,8 @@ def main():
     p.add_argument('--num-samples', type=int, default=100)
     p.add_argument('--component', choices=['all', 'vit', 'llm', 'vlm_proj', 'dit'], default='all')
     args = p.parse_args()
+    if args.num_samples < 1:
+        p.error('--num-samples must be positive')
     if not json.loads((args.dataset/'build_report.json').read_text())['ready_for_training']:
         print('Dataset annotations are unconfirmed; continuing quantization.', flush=True)
     if not (args.checkpoint/'experiment_cfg/metadata.json').is_file():
@@ -42,15 +44,7 @@ def main():
         return pixels, ids, mask, state, actions
 
     quantize.GrootApp._preprocess = preprocess_robot_batch
-    # Upstream computes its default dataset eagerly, even with --dataset-path.
-    # Avoid downloading the unrelated GR1 demo dataset.
-    quantize.get_default_dataset_path = lambda: str((args.dataset/'train').resolve())
-    sys.argv = ['grootn15-quantize', '--checkpoint', str(args.checkpoint.resolve()),
-                '--dataset-path', str((args.dataset/'train').resolve()),
-                '--data-config', 'episode_pose', '--embodiment-tag', 'new_embodiment',
-                '--host-device', 'cuda:0', '--component', args.component,
-                '--num-samples', str(args.num_samples), '--output', str(args.output.resolve())]
-    quantize.main()
+    run_quantization(quantize, args)
 
 
 if __name__ == '__main__':
