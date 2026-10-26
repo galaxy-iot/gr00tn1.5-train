@@ -11,7 +11,7 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 | 阶段 | 命令 | 执行脚本 |
 | --- | --- | --- |
 | 准备全部环境 | `./run.sh setup` | `scripts/pipeline.py` |
-| 转换数据 | `./run.sh convert` | `scripts/process_bags.py` → `scripts/build_dataset.py` |
+| 转换数据 | `./run.sh convert --task "任务指令"` | `scripts/process_bags.py` → `scripts/build_dataset.py` |
 | 检查数据 | `./run.sh check-data` | `scripts/validate_dataset.py`、`scripts/check_training_data.py` |
 | 正式训练 | `./run.sh train --output ./checkpoints/train_run1` | `scripts/train.py` |
 | 量化 | `bash quantize.sh quantize ...` | `scripts/quantize_model.py` |
@@ -27,7 +27,7 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 ## 本机开发验证
 
 ```bash
-./run.sh convert
+./run.sh convert --task "吸取桌上的物体并放到指定位置"
 ./run.sh check-data
 ./run.sh smoke --dry-run
 ./run.sh train --dry-run
@@ -36,10 +36,13 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 `convert` 使用 `gr00t-data` 环境解析录包、生成双相机 LeRobot v2 数据集，
 并完整解码视频检查帧数、时间对齐、动作和归一化统计。
 视频编码默认并行执行 2 个任务，每个 H.264 编码器使用 2 个线程。
-可运行 `./run.sh convert --video-workers 4 --encoder-threads 2` 调整并发；
+可运行 `./run.sh convert --task "任务指令" --video-workers 4 --encoder-threads 2` 调整并发；
 `--video-workers 1` 可让视频任务串行执行。并发越高，内存和磁盘读取压力越大。
 录包解析和最终验证仍串行执行；`--workers` 仅控制训练数据加载。
 默认直接扫描 `datas/*/metadata.yaml`，使用全部录包，不读取 `configs/episodes.json`。
+转换必须通过 `--task "任务指令"` 为全部录包指定统一语言指令，或通过 `--manifest` 提供逐录包标注；两者互斥。
+指令会写入 `episodes.source.json` 和训练/验证集的 `meta/tasks.jsonl`，由语言字段索引引用。
+空白指令和 `__UNLABELED...` 占位文本会被拒绝，`--allow-draft` 也不会绕过语言检查。
 按录包名称排序后每第 10 个留作验证，其余用于训练；时长从解析报告读取。
 需要自定义标注时才传 `--manifest PATH`；构建采用的标注会保存在数据集的 `episodes.source.json`。
 `check-data` 还使用 `gr00t-train` 环境里的真实 GR00T 数据加载器，
@@ -94,6 +97,8 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 ```bash
 ./run.sh deploy \
   --chipset qualcomm-qcs8275 \
+  --task "吸取桌上的物体并放到指定位置" \
+  --dataset ./datasets/episode_pose_dual_labeled \
   --work-dir ./exports/workflow \
   --max-steps 10000 \
   --batch-size 1 \
@@ -104,11 +109,12 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 `precompiled_qnn_onnx`。它复用 `convert` / `train` 的输入、数据集、环境和训练参数；
 也可用 `--device "准确设备名称"` 替代 `--chipset`。加 `--dry-run` 只预览命令。
 
-已有训练结果时，使用以下命令跳过训练：
+已有训练结果且其数据集已带真实任务指令时，使用以下命令跳过训练：
 
 ```bash
 ./run.sh deploy \
   --checkpoint ./checkpoint-10000 \
+  --dataset ./datasets/episode_pose_dual_labeled \
   --chipset qualcomm-qcs8275 \
   --work-dir ./exports/existing_checkpoint
 ```
@@ -167,12 +173,21 @@ QNN 的部署导出流程。安装和首次加载可能需要联网下载依赖�
 
 ## 可选：完善任务标注
 
-生成数据集后可直接运行 `./run.sh train`，无需人工确认标志或重新转换。
+用真实任务指令生成数据集后可直接运行 `./run.sh train --dataset 数据集路径`，无需人工确认标志。
 以下标注用于完善任务描述和片段质量，不会阻止训练。
 
-当前 60 个录包自动生成草稿，按每第 10 个留作验证，
+旧数据集的 60 个录包自动生成草稿，按每第 10 个留作验证，
 共 54 个训练录包和 6 个验证录包；每个录包暂用完整范围。
-任务文本为 `__UNLABELED_DO_NOT_TRAIN__`，所有人工确认标志为 false。
+旧数据集任务文本为 `__UNLABELED_DO_NOT_TRAIN__`，所有人工确认标志为 false。
+新转换流程不会再接受该占位文本。请提供真实指令并生成到新目录（中间解析数据可复用）：
+
+```bash
+./run.sh convert \
+  --task "吸取桌上的物体并放到指定位置" \
+  --dataset ./datasets/episode_pose_dual_labeled
+```
+
+以上指令仅为示例，请按录包实际任务填写。仅补充语言指令不会自动确认时间边界或同步标志。
 
 填写每个片段的 `task`、`start_seconds`、`end_seconds`，确认片段边界后设置
 该片段及顶层的 `boundaries_confirmed`。核对时钟和动作定义后，再设置
@@ -195,7 +210,7 @@ QNN 的部署导出流程。安装和首次加载可能需要联网下载依赖�
 修改标注后重建到新路径：
 
 ```bash
-./run.sh convert --dataset datasets/episode_pose_dual_labeled
+./run.sh convert --task "任务指令" --dataset datasets/episode_pose_dual_labeled
 ./run.sh check-data --dataset datasets/episode_pose_dual
 ```
 

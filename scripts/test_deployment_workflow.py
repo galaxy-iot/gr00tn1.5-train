@@ -15,9 +15,14 @@ class WorkflowTests(unittest.TestCase):
             root = Path(directory)
             dataset = root/'data'
             dataset.mkdir()
+            (dataset/'episodes.source.json').write_text('{"episodes": [{"task": "Pick up the object"}]}')
+            for split in ('train', 'val'):
+                meta = dataset/split/'meta'
+                meta.mkdir(parents=True)
+                (meta/'tasks.jsonl').write_text('{"task_index": 0, "task": "Pick up the object"}\n')
             (dataset/'build_report.json').write_text(json.dumps({'camera_names': ['front', 'wrist']}))
             args = SimpleNamespace(work_dir=root/'work', dry_run=False, dataset=dataset,
-                manifest=None, checkpoint=None, output=None, device='test-device', chipset=None,
+                manifest=None, task=None, checkpoint=None, output=None, device='test-device', chipset=None,
                 num_samples=100, base_model='test-model', max_steps=10, batch_size=1,
                 lora_rank=0, repo=root/'repo')
             trained = []
@@ -50,13 +55,18 @@ class WorkflowTests(unittest.TestCase):
             root = Path(directory)
             dataset = root/'data'
             dataset.mkdir()
+            (dataset/'episodes.source.json').write_text('{"episodes": [{"task": "Pick up the object"}]}')
+            for split in ('train', 'val'):
+                meta = dataset/split/'meta'
+                meta.mkdir(parents=True)
+                (meta/'tasks.jsonl').write_text('{"task_index": 0, "task": "Pick up the object"}\n')
             (dataset/'build_report.json').write_text(json.dumps({'camera_names': ['front', 'wrist']}))
             checkpoint = root/'checkpoint'
             (checkpoint/'experiment_cfg').mkdir(parents=True)
             (checkpoint/'experiment_cfg/metadata.json').write_text('{}')
             (checkpoint/'model.safetensors').write_bytes(b'weights')
             args = SimpleNamespace(work_dir=root/'work', dry_run=False, dataset=dataset,
-                manifest=None, checkpoint=checkpoint, device=None, chipset='test-chip', num_samples=100)
+                manifest=None, task=None, checkpoint=checkpoint, device=None, chipset='test-chip', num_samples=100)
             calls = []
             fail_qnn = True
 

@@ -2,6 +2,8 @@
 import argparse
 from pathlib import Path
 
+from task_labels import task_text
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,7 +26,9 @@ def parse_args(argv=None):
     data = p.add_argument_group('Data conversion')
     data.add_argument('--input', type=Path, default=ROOT/'datas')
     data.add_argument('--processed', type=Path, default=ROOT/'processed_dual')
-    data.add_argument('--manifest', type=Path, help='Optional annotations; defaults to all bags in --input')
+    labels = data.add_mutually_exclusive_group()
+    labels.add_argument('--task', help='Language instruction shared by all recorded bags')
+    labels.add_argument('--manifest', type=Path, help='Optional annotations; defaults to all bags in --input')
     snapshot = ROOT/'processed_dual/robot.urdf'
     data.add_argument('--urdf', type=Path, default=snapshot if snapshot.is_file() else
                    ROOT/'episode1_urdf_1113.urdf')
@@ -54,4 +58,11 @@ def parse_args(argv=None):
             setattr(args, key, value.resolve())
     if args.stage == 'deploy' and (not (args.device or args.chipset) or args.num_samples < 1):
         p.error('deploy requires --device or --chipset, and positive --num-samples')
+    if args.task is not None:
+        try:
+            args.task = task_text(args.task)
+        except ValueError as exc:
+            p.error(str(exc))
+    if args.stage in ('convert', 'all') and not (args.task or args.manifest):
+        p.error('Conversion requires --task "instruction" or --manifest PATH')
     return args

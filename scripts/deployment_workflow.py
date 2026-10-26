@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from workflow_state import StageRunner, lock
+from task_labels import validate_dataset_tasks
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,6 +41,7 @@ def _deploy(pipeline):
             raise ValueError('Dataset requires front and wrist cameras')
         if a.manifest and report.get('source_manifest_sha256') != file_id(a.manifest)[1]:
             raise ValueError('Manifest changed; choose a new dataset path')
+        validate_dataset_tasks(a.dataset, a.task)
         print(f'Reusing dataset: {a.dataset}', flush=True)
         pipeline.run(pipeline.data_python+[ROOT/'scripts/validate_dataset.py', a.dataset, '--decode-video'])
     else:

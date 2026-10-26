@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 from pipeline_cli import parse_args
+from task_labels import validate_dataset_tasks
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -95,6 +96,8 @@ class Pipeline:
 
     def convert(self):
         a = self.args
+        if not (a.task or a.manifest):
+            raise ValueError('Conversion requires --task "instruction" or --manifest PATH')
         if not a.urdf.is_file():
             raise ValueError(f'URDF not found: {a.urdf}. Pass --urdf /path/to/robot.urdf')
         if a.processed.exists() and any(a.processed.iterdir()):
@@ -128,11 +131,14 @@ class Pipeline:
                     raise ValueError('Dataset bag set differs from input. Choose a new --dataset path.')
             if (a.dataset/'robot.urdf').read_bytes() != a.urdf.read_bytes():
                 raise ValueError('Dataset URDF differs. Choose a new --dataset path.')
+            validate_dataset_tasks(a.dataset, a.task)
             print(f'Reusing dataset: {a.dataset}', flush=True)
         else:
             cmd = self.data_python+[ROOT/'scripts/build_dataset.py', '--processed', a.processed,
                                    '--output', a.dataset, '--video-workers', str(a.video_workers),
                                    '--encoder-threads', str(a.encoder_threads)]
+            if a.task:
+                cmd += ['--task', a.task]
             if a.manifest:
                 cmd += ['--manifest', a.manifest]
             # Generated datasets can be used directly for training.

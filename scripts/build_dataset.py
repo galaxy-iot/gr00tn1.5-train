@@ -17,6 +17,7 @@ from PIL import Image
 from rosbags.highlevel import AnyReader
 
 from process_bags import write_json
+from task_labels import task_text, validate_tasks
 
 CAMERAS = ('front', 'wrist')
 
@@ -70,7 +71,7 @@ def encode_video(bag, indices, path, fps, size, image_topic='/camera/image_raw/c
             container.mux(packet)
 
 
-def draft_manifest(processed):
+def draft_manifest(processed, task=None):
     """Create an explicitly unconfirmed full-range manifest from processed reports."""
     reports = sorted(processed.glob('bag_*/report.json'))
     if not reports:
@@ -83,7 +84,7 @@ def draft_manifest(processed):
             'split': 'val' if index % 10 == 0 else 'train',
             'start_seconds': 0.0,
             'end_seconds': float(report['duration_seconds']),
-            'task': '__UNLABELED_DO_NOT_TRAIN__',
+            'task': task if task is not None else '__UNLABELED_DO_NOT_TRAIN__',
             'boundaries_confirmed': False,
             'initial_suction': False,
             'image_time_offset_seconds': 0.0,
@@ -101,7 +102,9 @@ def draft_manifest(processed):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--processed', type=Path, default=Path('processed_dual'))
-    p.add_argument('--manifest', type=Path,
+    labels = p.add_mutually_exclusive_group()
+    labels.add_argument('--task', help='Language instruction shared by all recorded bags')
+    labels.add_argument('--manifest', type=Path,
                    help='Optional reviewed annotations; otherwise use all processed bags as a draft')
     p.add_argument('--output', type=Path, default=Path('datasets/episode_pose_dual'))
     p.add_argument('--allow-draft', action='store_true')
@@ -111,6 +114,10 @@ def main():
     p.add_argument('--video-workers', type=int, default=2, help='Concurrent video encoding jobs')
     p.add_argument('--encoder-threads', type=int, default=2, help='H.264 threads per video job')
     args = p.parse_args()
+    if args.task is not None:
+        args.task = task_text(args.task)
+    if not args.generate_draft_manifest and not (args.task or args.manifest):
+        p.error('Dataset construction requires --task "instruction" or --manifest PATH')
     if args.video_workers < 1 or args.encoder_threads < 1:
         p.error('Video workers and encoder threads must be positive')
     if args.fps <= 0 or 10**9 % args.fps:
@@ -120,16 +127,17 @@ def main():
         if destination.exists():
             raise ValueError(f'Refusing to overwrite existing manifest: {destination}')
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(draft_manifest(args.processed), indent=2, ensure_ascii=False)+'\n')
+        destination.write_text(json.dumps(draft_manifest(args.processed, args.task), indent=2, ensure_ascii=False)+'\n')
         print(f'Wrote unconfirmed draft manifest: {destination}', flush=True)
         return
     if args.manifest:
         manifest_bytes = args.manifest.read_bytes()
         manifest = json.loads(manifest_bytes)
     else:
-        manifest = draft_manifest(args.processed)
+        manifest = draft_manifest(args.processed, args.task)
         manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False)+'\n').encode()
         print(f'Using all {len(manifest["episodes"])} processed bags as an unconfirmed draft', flush=True)
+    validate_tasks(manifest)
     if not manifest.get('episodes'):
         raise ValueError('Manifest contains no episodes')
     seen_splits = {}
