@@ -201,7 +201,61 @@ python prepare_language.py \
 `input_embeds` 形状为 `(1, 640, 2048)`。调用 LLM 前，必须用实时 ViT 输出替换
 `input_embeds[image_token_mask]`；`ort_qnn_standalone.py` 的组件流水线已有这一替换步骤。
 图像和机器人状态预处理、投影器/DiT mask、扩散调度及动作反归一化仍需在推理程序中实现。
-此资源包单独执行 `preprocess` 导出，目前不会由 `qnn` / `deploy` 自动附带。
+量化成功后会自动将这些资源保存到量化输出的 `preprocessing/`；`qnn` 会自动复制到
+最终导出目录，`deploy` 也会生成包含模型和预处理资源的完整文件夹。
+普通浮点 `onnx` 导出同样自动附带预处理资源。独立的 `preprocess` 命令仍可单独使用。
+
+量化及预编译 QNN ONNX 导出示例：
+
+```bash
+bash quantize.sh quantize \
+  --checkpoint ./checkpoint-10000 \
+  --dataset ./datasets/episode_pose_dual_labeled \
+  --output ./exports/gr00t_quantized \
+  --num-samples 100
+
+bash quantize.sh qnn \
+  --checkpoint ./exports/gr00t_quantized \
+  --chipset qualcomm-qcs8275 \
+  --runtime precompiled_qnn_onnx \
+  --output ./exports/gr00t_deployment
+```
+
+最终只需整体复制 `exports/gr00t_deployment/`，无需额外携带原始 checkpoint：
+
+```text
+gr00t_deployment/
+├── ...                         # 编译模型及外部权重/context 文件，保留原相对路径
+├── preprocessing/
+│   ├── processor/              # Tokenizer、模板和自定义处理代码
+│   ├── embedding.npy           # 对应 checkpoint 的词嵌入
+│   ├── experiment_cfg/         # 机器人元数据、归一化统计
+│   ├── robot.urdf              # 量化时从数据集附带
+│   ├── prepare_language.py
+│   ├── requirements-preprocessing.txt
+│   └── ...
+├── ort_qnn_standalone.py        # 接收已准备张量的组件测试工具
+├── README_BUNDLE.md
+└── bundle.json                 # 完成标志及模型相对路径
+```
+
+在最终目录内转换语言指令：
+
+```bash
+python preprocessing/prepare_language.py \
+  --bundle ./preprocessing \
+  --instruction "吸取桌上的物体并放到指定位置" \
+  --output ./instruction.npz
+```
+
+旧版量化目录没有 `preprocessing/` 时，给 `qnn` 增加
+`--source-checkpoint ./checkpoint-10000`，会从原训练 checkpoint 自动补齐后编译，
+无需重新量化。原 checkpoint 必须对应这份量化模型；新量化输出无需此参数。
+必要时还可搭配 `--processor-dir` 指定训练使用的 Eagle 资源。
+
+每份预处理资源约增加 1.2 GB；最终目录使用实际文件而非指向原 checkpoint 的链接。
+目标机仍需安装对应的推理运行库，以及实现前述图像、状态和动作处理逻辑。
+工作流只有在预处理导出及模型打包都成功后才会记录完成。
 
 ## 可选：完善任务标注
 

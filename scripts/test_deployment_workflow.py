@@ -7,6 +7,8 @@ import unittest
 from unittest.mock import patch
 
 from deployment_workflow import deploy
+from deployment_bundle import finalize_bundle
+from test_deployment_bundle import make_preprocessing
 
 
 class WorkflowTests(unittest.TestCase):
@@ -41,6 +43,9 @@ class WorkflowTests(unittest.TestCase):
                     output = Path(command[command.index('--output')+1])
                     output.mkdir(parents=True)
                     (output/'model.onnx').write_bytes(b'model')
+                    make_preprocessing(output/'preprocessing')
+                    if command[2] == 'qnn':
+                        finalize_bundle(output, 'precompiled_qnn_onnx')
 
             pipeline = SimpleNamespace(args=args, data_python=['python'], run=run,
                                        check=lambda: None, train=train)
@@ -79,6 +84,9 @@ class WorkflowTests(unittest.TestCase):
                 output = Path(command[command.index('--output')+1])
                 output.mkdir(parents=True)
                 (output/'model.onnx').write_bytes(b'model')
+                make_preprocessing(output/'preprocessing')
+                if kind == 'qnn':
+                    finalize_bundle(output, 'precompiled_qnn_onnx')
                 calls.append((kind, output))
                 if kind == 'qnn' and fail_qnn:
                     fail_qnn = False

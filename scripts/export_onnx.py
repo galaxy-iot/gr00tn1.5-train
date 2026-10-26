@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 
 from quantization_config import register_config
+from deployment_bundle import export_preprocessing, finalize_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,6 +16,7 @@ def main():
     parser.add_argument('--checkpoint', type=Path, required=True)
     parser.add_argument('--dataset', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--processor-dir', type=Path, help='Optional training Eagle processor assets')
     parser.add_argument('--component', choices=['all', 'vit', 'llm', 'vlm_proj', 'dit'], default='all')
     args = parser.parse_args()
     checkpoint = args.checkpoint.resolve()
@@ -57,6 +59,9 @@ def main():
     shutil.copytree(checkpoint/'experiment_cfg', args.output/'experiment_cfg')
     shutil.copyfile(ROOT/'episode_config.py', args.output/'episode_config.py')
     shutil.copyfile(args.dataset/'robot.urdf', args.output/'robot.urdf')
+    export_preprocessing(checkpoint, args.output.resolve()/'preprocessing',
+                         dataset=args.dataset, processor_dir=args.processor_dir)
+    finalize_bundle(args.output, 'float_onnx')
     (args.output/'export_report.json').write_text(json.dumps({
         'checkpoint': str(checkpoint), 'embodiment': 'new_embodiment', 'data_config': 'episode_pose',
         'components': exported, 'precision': 'float32', 'npu_compiled': False,

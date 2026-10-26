@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from quantization_config import register_config
+from deployment_bundle import export_preprocessing
 from quantization_samples import run_quantization
 
 
@@ -13,6 +14,7 @@ def main():
     p.add_argument('--checkpoint', type=Path, required=True)
     p.add_argument('--dataset', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--processor-dir', type=Path, help='Optional training Eagle processor assets')
     p.add_argument('--num-samples', type=int, default=100)
     p.add_argument('--component', choices=['all', 'vit', 'llm', 'vlm_proj', 'dit'], default='all')
     args = p.parse_args()
@@ -45,6 +47,8 @@ def main():
 
     quantize.GrootApp._preprocess = preprocess_robot_batch
     run_quantization(quantize, args)
+    export_preprocessing(args.checkpoint, args.output.resolve()/'preprocessing',
+                         dataset=args.dataset, processor_dir=args.processor_dir)
 
 
 if __name__ == '__main__':

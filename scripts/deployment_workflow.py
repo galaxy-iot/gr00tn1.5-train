@@ -6,6 +6,7 @@ from pathlib import Path
 
 from workflow_state import StageRunner, lock
 from task_labels import validate_dataset_tasks
+from deployment_bundle import validate_preprocessing, validate_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,7 +52,9 @@ def _deploy(pipeline):
 
     sources = [file_id(ROOT/p) for p in ('episode_config.py', 'scripts/train.py',
                'scripts/quantize_model.py', 'scripts/quantization_samples.py',
-               'scripts/quantization_config.py', 'scripts/export_qnn.py')]
+               'scripts/quantization_config.py', 'scripts/export_qnn.py',
+               'scripts/export_preprocessing.py', 'scripts/prepare_language.py',
+               'scripts/deployment_bundle.py')]
     dataset_id = file_id(a.dataset/'build_report.json') if (a.dataset/'build_report.json').is_file() else str(a.dataset)
     if a.checkpoint:
         checkpoint = a.checkpoint
@@ -82,13 +85,17 @@ def _deploy(pipeline):
         if not output.is_dir() or not any(p.is_file() and p.stat().st_size for p in output.rglob('*')):
             raise ValueError(f'Missing or empty stage output: {output}')
 
+    def validate_quantized(output):
+        validate_files(output)
+        validate_preprocessing(output/'preprocessing')
+
     quantized = stages.run('quantize', [identity, dataset_id, sources, a.num_samples, str(quant_env)],
         lambda output: pipeline.run(['bash', ROOT/'quantize.sh', 'quantize',
             '--checkpoint', checkpoint, '--dataset', a.dataset, '--output', output,
-            '--num-samples', a.num_samples]), validate_files)
+            '--num-samples', a.num_samples]), validate_quantized)
     target = ['--device', a.device] if a.device else ['--chipset', a.chipset]
     exported = stages.run('qnn', [str(quantized), sources, target, 'precompiled_qnn_onnx'],
         lambda output: pipeline.run(['bash', ROOT/'quantize.sh', 'qnn',
             '--checkpoint', quantized, *target, '--runtime', 'precompiled_qnn_onnx',
-            '--output', output]), validate_files)
+            '--output', output]), validate_bundle)
     print(f'Precompiled QNN ONNX output: {exported}', flush=True)
