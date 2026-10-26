@@ -12,7 +12,9 @@ from export_onnx import register_config
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--checkpoint', type=Path, required=True, help='Quantized collection directory')
-    p.add_argument('--device', required=True, help='Exact supported AI Hub device name; never substitutes IQ-9075')
+    target = p.add_mutually_exclusive_group(required=True)
+    target.add_argument('--device', help='Exact supported AI Hub device name')
+    target.add_argument('--chipset', help='AI Hub chipset identifier, e.g. qualcomm-qcs8275')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--runtime', choices=['precompiled_qnn_onnx', 'qnn_context_binary'], default='precompiled_qnn_onnx')
     args = p.parse_args()
@@ -24,10 +26,11 @@ def main():
     from qai_hub_models_cli.cli import main as cli_main
     # Generic GrootDataset currently loads DEFAULT GR1 metadata. Do not run
     # that example-based inferencing for our robot; validate with task inputs.
+    target_args = ['--device', args.device] if args.device else ['--chipset', args.chipset]
     cli_main(['export', 'grootn15', '--checkpoint', str(args.checkpoint.resolve()),
               '--data-config', 'episode_pose', '--embodiment-tag', 'new_embodiment',
               '--precision', 'mixed', '--target-runtime', args.runtime,
-              '--device', args.device, '--output-dir', str(args.output.resolve()), '--skip-inferencing'])
+              *target_args, '--output-dir', str(args.output.resolve()), '--skip-inferencing'])
 
 
 if __name__ == '__main__':
