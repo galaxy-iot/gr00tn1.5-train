@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Download, isolated Conda setup, ROS bag conversion, and training."""
-import argparse
+"""Execute the environment, data and training stages behind run.sh."""
 from datetime import datetime
 import hashlib
 import json
@@ -10,6 +9,8 @@ import shlex
 import shutil
 import subprocess
 import sys
+
+from pipeline_cli import parse_args
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,7 +29,7 @@ def find_conda(explicit, dry_run):
 class Pipeline:
     def __init__(self, args):
         self.args = args
-        self.conda = 'conda' if args.stage == 'download' else find_conda(args.conda, args.dry_run)
+        self.conda = 'conda' if args.stage in ('download', 'setup-quant') else find_conda(args.conda, args.dry_run)
         self.data_python = [self.conda, 'run', '--no-capture-output', '-n', args.data_env, 'python']
         self.train_python = [self.conda, 'run', '--no-capture-output', '-n', args.train_env, 'python']
 
@@ -73,6 +74,10 @@ class Pipeline:
     def setup(self):
         self.setup_data()
         self.setup_train()
+        self.setup_quant()
+
+    def setup_quant(self):
+        self.run(['bash', ROOT/'quantize.sh', 'setup'])
 
     def check(self):
         # Actual CUDA tensor allocation catches runtime errors that nvidia-smi alone cannot.
@@ -134,9 +139,9 @@ class Pipeline:
             self.run(cmd+['--allow-draft'])
         self.run(self.data_python+[ROOT/'scripts/validate_dataset.py', a.dataset, '--decode-video'])
 
-    def train(self, smoke=False):
+    def train(self, smoke=False, output=None):
         a = self.args
-        output = a.output or ROOT/'checkpoints'/datetime.now().strftime(('smoke_' if smoke else 'train_')+'%Y%m%d_%H%M%S')
+        output = output or a.output or ROOT/'checkpoints'/datetime.now().strftime(('smoke_' if smoke else 'train_')+'%Y%m%d_%H%M%S')
         cmd = self.train_python+[ROOT/'scripts/train.py', '--repo', a.repo, '--dataset', a.dataset,
                '--output', output, '--batch-size', str(a.batch_size), '--workers', str(a.workers),
                '--max-steps', str(a.max_steps), '--lora-rank', str(a.lora_rank), '--base-model', a.base_model]
@@ -151,45 +156,13 @@ class Pipeline:
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('stage', choices=['download', 'setup-data', 'setup-train', 'setup', 'convert', 'check-data', 'check', 'smoke', 'train', 'all'])
-    p.add_argument('--dry-run', action='store_true', help='Print commands without downloading, installing, converting or training')
-    p.add_argument('--conda')
-    p.add_argument('--data-env', default='gr00t-data')
-    p.add_argument('--train-env', default='gr00t-train')
-    p.add_argument('--repo', type=Path, default=ROOT/'third_party/Isaac-GR00T')
-    p.add_argument('--input', type=Path, default=ROOT/'datas')
-    p.add_argument('--processed', type=Path, default=ROOT/'processed_dual')
-    p.add_argument('--manifest', type=Path, help='Optional annotations; defaults to all bags in --input')
-    snapshot = ROOT/'processed_dual/robot.urdf'
-    p.add_argument('--urdf', type=Path, default=snapshot if snapshot.is_file() else
-                   ROOT/'episode1_urdf_1113.urdf')
-    p.add_argument('--dataset', type=Path, default=ROOT/'datasets/episode_pose_dual')
-    p.add_argument('--output', type=Path)
-    p.add_argument('--batch-size', type=int, default=1)
-    p.add_argument('--workers', type=int, default=2)
-    p.add_argument('--video-workers', type=int, default=2, help='Concurrent conversion video jobs')
-    p.add_argument('--encoder-threads', type=int, default=2, help='H.264 threads per video job')
-    p.add_argument('--max-steps', type=int, default=10000)
-    p.add_argument('--lora-rank', type=int, default=0)
-    p.add_argument('--base-model', default='nvidia/GR00T-N1.5-3B')
-    p.add_argument('--flash-attn-version', default='2.7.1.post4')
-    p.add_argument('--flash-attn-wheel', type=Path, help='Install a downloaded FlashAttention wheel instead of accessing GitHub')
-    args = p.parse_args()
-    if args.video_workers < 1 or args.encoder_threads < 1:
-        p.error('Video workers and encoder threads must be positive')
-    if args.batch_size < 1 or args.workers < 1 or args.max_steps < 1 or args.lora_rank < 0:
-        p.error('Batch size, workers and steps must be positive; LoRA rank must be nonnegative')
-    if args.data_env == args.train_env or any(not name or name == 'base' or '/' in name or '\\' in name
-                                             or name.startswith('-') for name in (args.data_env, args.train_env)):
-        p.error('Choose two distinct non-base Conda environment names')
-    for key in ('repo', 'input', 'processed', 'manifest', 'urdf', 'dataset', 'output'):
-        value = getattr(args, key)
-        if value is not None:
-            setattr(args, key, value.resolve())
-    pipeline = Pipeline(args)
+    args = parse_args()
     try:
-        if args.stage == 'all':
+        pipeline = Pipeline(args)
+        if args.stage == 'deploy':
+            from deployment_workflow import deploy
+            deploy(pipeline)
+        elif args.stage == 'all':
             pipeline.setup()
             pipeline.convert()
             pipeline.train(smoke=True)

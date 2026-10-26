@@ -4,6 +4,26 @@
 GR00T 代码固定在 `4af2b622892f7dcb5aae5a3fb70bcb02dc217b96`，
 GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/` 代理。
 
+## 常用入口
+
+所有命令在项目根目录执行，日常操作使用以下入口：
+
+| 阶段 | 命令 | 执行脚本 |
+| --- | --- | --- |
+| 准备全部环境 | `./run.sh setup` | `scripts/pipeline.py` |
+| 转换数据 | `./run.sh convert` | `scripts/process_bags.py` → `scripts/build_dataset.py` |
+| 检查数据 | `./run.sh check-data` | `scripts/validate_dataset.py`、`scripts/check_training_data.py` |
+| 正式训练 | `./run.sh train --output ./checkpoints/train_run1` | `scripts/train.py` |
+| 量化 | `bash quantize.sh quantize ...` | `scripts/quantize_model.py` |
+| 编译 QNN | `bash quantize.sh qnn ...` | `scripts/export_qnn.py` |
+| 自动执行完整流程 | `./run.sh deploy --chipset qualcomm-qcs8275` | `scripts/deployment_workflow.py` |
+
+内部职责：`pipeline_cli.py` 管理命令参数，`pipeline.py` 执行环境、数据和训练阶段，
+`deployment_workflow.py` 串联部署流程，`workflow_state.py` 管理完成记录和重试。
+`quantization_config.py` 统一注册机器人配置，`quantization_samples.py` 处理双相机校准样本。
+`ort_qnn_standalone.py` 是独立推理工具，不参与训练和导出流程。
+`all` 保留原有“环境准备 → 转换 → 10 步 smoke”行为；完整正式流程使用 `deploy`。
+
 ## 本机开发验证
 
 ```bash
@@ -52,6 +72,58 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 - 动作是下一帧（50 ms 后）的测量位姿和吸盘状态，并非录制的控制器目标。
   模型预测 16 步动作；位置按训练集统计归一化，6D 旋转保持原表示。
 - 这是 `link6` 位姿，不是吸盘 TCP。部署控制器需要使用一致的坐标和动作语义。
+
+## 一键转换、训练、量化和 QNN ONNX 编译
+
+首次使用一条命令准备数据处理、训练和量化三个环境（需要已安装 Conda 和 uv）：
+
+```bash
+./run.sh setup
+```
+
+该命令依次准备 `gr00t-data`、`gr00t-train` 和 `.venv-quant`，并检查训练 GPU。
+已有环境会复用并安装依赖；仅准备某个环境可使用 `setup-data`、`setup-train`、
+`setup-quant`。AI Hub 账号凭据首次使用时另行配置：
+
+```bash
+.venv-quant/bin/qai-hub configure --api_token YOUR_API_TOKEN
+```
+
+运行完整流程（目标芯片需在 AI Hub 中受支持）：
+
+```bash
+./run.sh deploy \
+  --chipset qualcomm-qcs8275 \
+  --work-dir ./exports/workflow \
+  --max-steps 10000 \
+  --batch-size 1 \
+  --num-samples 100
+```
+
+`deploy` 依次转换数据、正式训练、量化校准并上传 AI Hub，生成
+`precompiled_qnn_onnx`。它复用 `convert` / `train` 的输入、数据集、环境和训练参数；
+也可用 `--device "准确设备名称"` 替代 `--chipset`。加 `--dry-run` 只预览命令。
+
+已有训练结果时，使用以下命令跳过训练：
+
+```bash
+./run.sh deploy \
+  --checkpoint ./checkpoint-10000 \
+  --chipset qualcomm-qcs8275 \
+  --work-dir ./exports/existing_checkpoint
+```
+
+相同命令可以重复执行：
+
+- 已有双相机数据集时跳过转换，但仍解码验证；修改原始录包、URDF 或数据构建配置后，应指定新的 `--dataset` / `--processed`。
+- 训练、量化和编译成功后分别写入 `--work-dir` 下的 JSON 完成记录；再次执行会校验配置及产物并跳过成功阶段。
+- 失败阶段保留已有文件，再次执行会使用新的尝试目录重新运行该阶段，不会从失败阶段内部断点续跑。
+- 输入、脚本或相关配置变化时拒绝复用已有完成记录，请指定新的 `--work-dir`。手动生成的量化/编译目录不会仅凭存在就视为成功。
+
+最终目录会打印为 `Precompiled QNN ONNX output: ...`，也记录在工作目录的
+`qnn.json` 中。此流程需要本地 CUDA GPU、模型下载权限以及可用的 AI Hub 凭据；
+导出仍跳过示例推理，需要在目标板用实际机器人输入验证。训练环境不会自动重装，
+量化环境不存在时会自动运行 `quantize.sh setup`。
 
 ## 量化与 ONNX 导出的 uv 环境
 
@@ -141,5 +213,5 @@ QNN 的部署导出流程。安装和首次加载可能需要联网下载依赖�
 ```
 
 `smoke` 运行真实 10 步训练，并检查有限 loss/梯度和检查点保存；允许草稿数据测试连通性。
-`train` 要求正式确认的数据；首次训练会下载基础模型。批量大小需按目标机器显存调整。
+`train` 允许当前生成的草稿数据；首次训练会下载基础模型。批量大小需按目标机器显存调整。
 验证集独立保存，当前训练入口没有自动执行任务成功率评估。

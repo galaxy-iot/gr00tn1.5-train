@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from export_onnx import register_config
+from quantization_config import register_config
 from quantization_samples import run_quantization
 
 

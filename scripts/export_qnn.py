@@ -6,7 +6,7 @@ This submits jobs to Qualcomm AI Hub. Run --help to inspect this wrapper first.
 import argparse
 from pathlib import Path
 
-from export_onnx import register_config
+from quantization_config import register_config
 
 
 def main():

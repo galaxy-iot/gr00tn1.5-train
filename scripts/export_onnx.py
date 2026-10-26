@@ -2,21 +2,12 @@
 """Local float ONNX export via Qualcomm's N1.5 adapters; no cloud submission."""
 import argparse
 import json
-import os
 from pathlib import Path
 import shutil
-import sys
+
+from quantization_config import register_config
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def register_config():
-    # Qualcomm imports the pinned repository through its external-repo package.
-    from qai_hub_models.models.grootn15.external_repos.gr00t.gr00t.experiment.data_config import DATA_CONFIG_MAP
-    os.environ['EPISODE_GR00T_PREFIX'] = 'qai_hub_models.models.grootn15.external_repos.gr00t.gr00t'
-    sys.path.insert(0, str(ROOT))
-    from episode_config import EpisodePoseConfig
-    DATA_CONFIG_MAP['episode_pose'] = EpisodePoseConfig()
 
 
 def main():
