@@ -171,6 +171,38 @@ bash quantize.sh onnx \
 量化校准产物包含 ONNX、外部权重和 AIMET encodings，后续仍需匹配
 QNN 的部署导出流程。安装和首次加载可能需要联网下载依赖、外部源码及模型资源。
 
+## 导出离线语言预处理资源
+
+已有训练 checkpoint 时无需重新训练，使用量化环境导出：
+
+```bash
+bash quantize.sh preprocess \
+  --checkpoint ./checkpoint-10000 \
+  --output ./exports/checkpoint-10000_preprocessing
+```
+
+此步骤在 CPU 上运行，从 checkpoint 提取词嵌入，并复制固定版本 GR00T 仓库自带的
+Eagle Tokenizer、Processor、自定义处理代码、模型配置及 `experiment_cfg`。
+自动查找 `third_party/Isaac-GR00T` 或本机 Qualcomm 缓存；找不到时使用
+`--processor-dir /path/to/gr00t/model/backbone/eagle2_hg_model` 指定训练使用的资源。
+不下载完整基础模型，输出目录必须不存在。
+
+将整个输出目录复制到另一台设备，在兼容环境安装其中的 `requirements-preprocessing.txt`，然后运行：
+
+```bash
+python prepare_language.py \
+  --bundle . \
+  --instruction "吸取桌上的物体并放到指定位置" \
+  --output ./instruction.npz
+```
+
+请在资源目录内执行以上命令。支持离线处理，输出 `input_ids`、`attention_mask`、
+`input_embeds`、`image_token_mask`、`llm_attention_mask`。当前双相机配置的
+`input_embeds` 形状为 `(1, 640, 2048)`。调用 LLM 前，必须用实时 ViT 输出替换
+`input_embeds[image_token_mask]`；`ort_qnn_standalone.py` 的组件流水线已有这一替换步骤。
+图像和机器人状态预处理、投影器/DiT mask、扩散调度及动作反归一化仍需在推理程序中实现。
+此资源包单独执行 `preprocess` 导出，目前不会由 `qnn` / `deploy` 自动附带。
+
 ## 可选：完善任务标注
 
 用真实任务指令生成数据集后可直接运行 `./run.sh train --dataset 数据集路径`，无需人工确认标志。

@@ -15,6 +15,7 @@ Usage:
   bash quantize.sh check             Check CUDA and installed dependencies
   bash quantize.sh quantize [args]   Run scripts/quantize_model.py
   bash quantize.sh onnx [args]       Run scripts/export_onnx.py (float ONNX)
+  bash quantize.sh preprocess [args] Export offline tokenizer and checkpoint embeddings
   bash quantize.sh qnn [args]        Compile calibrated models using AI Hub (uploads model)
 
 Install published qai-hub-models from the configured package index.
@@ -25,7 +26,7 @@ official grootn15 dependency recipe. Quantization requires a CUDA GPU;
 the official recipe recommends 40 GB VRAM for the 3B model.
 EOF
     exit 0 ;;
-  setup|check|quantize|onnx|qnn) ;;
+  setup|check|quantize|onnx|qnn|preprocess) ;;
   *) echo "Unknown stage: $stage (use --help)" >&2; exit 2 ;;
 esac
 command -v uv >/dev/null || { echo 'uv is required: https://docs.astral.sh/uv/getting-started/installation/' >&2; exit 1; }
@@ -72,5 +73,6 @@ case "$stage" in
   check) exit 0 ;;
   quantize) exec "$quant_env/bin/python" "$project_root/scripts/quantize_model.py" "$@" ;;
   onnx) exec "$quant_env/bin/python" "$project_root/scripts/export_onnx.py" "$@" ;;
+  preprocess) exec "$quant_env/bin/python" "$project_root/scripts/export_preprocessing.py" "$@" ;;
   qnn) exec "$quant_env/bin/python" "$project_root/scripts/export_qnn.py" "$@" ;;
 esac
