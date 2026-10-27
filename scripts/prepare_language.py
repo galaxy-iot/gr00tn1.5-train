@@ -54,12 +54,29 @@ def prepare_language(bundle, instruction):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--bundle', type=Path, required=True)
-    p.add_argument('--instruction', required=True)
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--bundle', type=Path)
+    mode.add_argument('--input-ids', type=Path, help='Processor-generated integer .npy [batch, sequence]')
+    p.add_argument('--embedding', type=Path, default=Path(__file__).parent/'embedding.npy')
+    p.add_argument('--instruction')
     p.add_argument('--output', type=Path, required=True)
     args = p.parse_args()
     if args.output.exists():
         p.error('Use a fresh --output file')
+    if args.input_ids is not None:
+        import numpy as np
+        ids = np.load(args.input_ids, allow_pickle=False)
+        table = np.load(args.embedding, mmap_mode='r', allow_pickle=False)
+        if ids.ndim != 2 or not np.issubdtype(ids.dtype, np.integer) or ids.size == 0:
+            p.error('input IDs must be a nonempty integer [batch, sequence] array')
+        if table.ndim != 2 or ids.min() < 0 or ids.max() >= len(table):
+            p.error('Token IDs exceed the embedding vocabulary, or table is invalid')
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open('xb') as handle:
+            np.save(handle, table[ids], allow_pickle=False)
+        return
+    if not args.instruction:
+        p.error('--instruction is required with --bundle')
     # Set before importing transformers, so no global HF cache is required.
     os.environ.setdefault('HF_MODULES_CACHE', str(args.bundle.resolve()/'.hf_modules'))
     import numpy as np

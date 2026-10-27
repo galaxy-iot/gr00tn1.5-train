@@ -131,6 +131,54 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 导出仍跳过示例推理，需要在目标板用实际机器人输入验证。训练环境不会自动重装，
 量化环境不存在时会自动运行 `quantize.sh setup`。
 
+## 从量化到完整部署目录
+
+以下步骤使用已有完整训练 checkpoint。`--processor` 必须指向该模型训练时使用的
+完整本地 processor 目录（含 tokenizer、模板及其自定义代码），不能随意换成其他模型的 tokenizer。
+若训练 checkpoint 本身没有 processor，请从训练使用的模型资源目录获取对应目录。
+
+```bash
+# 首次使用
+bash quantize.sh setup
+bash quantize.sh check
+.venv-quant/bin/qai-hub configure --api_token YOUR_API_TOKEN
+
+# 1. 校准全部组件；至少需要 200 个数据集时间步
+bash quantize.sh quantize \
+  --checkpoint ./checkpoint-10000 \
+  --dataset ./datasets/episode_pose_dual \
+  --output ./exports/gr00t_quantized \
+  --num-samples 100
+
+# 2. 上传到 AI Hub 编译并下载；保留整个输出目录
+bash quantize.sh qnn \
+  --checkpoint ./exports/gr00t_quantized \
+  --chipset qualcomm-qcs8275 \
+  --runtime precompiled_qnn_onnx \
+  --output ./exports/gr00t_qnn
+
+# 3. 本地打包；替换 --processor 的路径
+bash quantize.sh bundle \
+  --compiled ./exports/gr00t_qnn \
+  --checkpoint ./checkpoint-10000 \
+  --dataset ./datasets/episode_pose_dual \
+  --processor /absolute/path/to/matching/processor \
+  --output ./exports/gr00t_deployment
+```
+
+三个输出目录均须尚不存在。当前 `qnn` 已自动生成完整部署包，第二步完成后
+`exports/gr00t_qnn/` 即可整体部署；第三步是可选的本地重新打包入口，
+适用于已有编译产物或需要重新收集对应预处理资源的情况，不会重新提交 AI Hub 任务。
+`bundle` 复用统一的预处理导出、离线 processor 校验及部署包校验流程，
+保留编译模型、外部权重和 context 文件的原相对路径。
+原 checkpoint 必须含完整词嵌入权重，不能只有 adapter。
+
+最终输出结构及文本指令处理方式见下文。`prepare_language.py` 同时支持
+`--bundle ... --instruction ... --output instruction.npz` 文本模式和
+`--input-ids ids.npy --embedding embedding.npy --output input_embeds.npy` token IDs 模式。
+后者仅生成词嵌入，不生成 attention masks。
+`bundle.json` 是打包完成标志，不代表板端完整机器人推理验证通过。
+
 ## 量化与 ONNX 导出的 uv 环境
 
 使用独立的 `.venv-quant`，不需要激活 conda 或准备本地 Qualcomm 源码。
