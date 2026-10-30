@@ -1,3 +1,22 @@
+# 电机关节角度与吸盘状态训练分支
+
+本分支模型使用双相机、当前关节角度和吸盘状态作为输入，预测未来 16 步的绝对关节角度与吸盘状态。
+关节顺序由 URDF 的 `base_link` → `link6` 链确定，写入 `build_report.json` 的 `joint_names`；
+角度单位为弧度，最后一维为吸盘状态（0 关闭，1 开启）。角度按训练集 min/max 归一化，部署时需反归一化；
+吸盘输出以 0.5 为阈值转换为开关。动作标签使用 50 ms 后的实测关节角度及吸盘命令状态，仍非录制的电机控制目标。
+吸盘字段表示命令开关，不代表吸附成功反馈。推理无需从末端位姿做逆运动学。
+
+```bash
+./run.sh setup
+./run.sh convert --task "填写录包实际任务" --dataset ./datasets/episode_joint_dual
+./run.sh check-data --dataset ./datasets/episode_joint_dual
+./run.sh smoke --dataset ./datasets/episode_joint_dual --batch-size 1
+./run.sh train --dataset ./datasets/episode_joint_dual --output ./checkpoints/joint_suction --batch-size 1 --max-steps 10000
+```
+
+已有位姿数据集不能直接训练本分支配置，必须使用新目录重新转换。原 `processed_dual` 可复用。
+以下为通用流程说明。
+
 # GR00T N1.5 双相机训练流程
 
 本项目使用全局相机和腕部相机，微调 `nvidia/GR00T-N1.5-3B`。
@@ -58,7 +77,7 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 | `episode1_urdf_1113.urdf` | 机器人 URDF |
 | `configs/episodes.json` | 可选人工标注示例，仅显式传入 `--manifest` 时使用 |
 | `processed_dual/` | 两路图像时间戳、关节/FK、吸盘状态和报告 |
-| `datasets/episode_pose_dual/` | 双相机训练集和验证集 |
+| `datasets/episode_joint_dual/` | 双相机训练集和验证集 |
 | `episode_config.py` | GR00T 输入及变换配置 |
 
 已完成输出可复用。输入配置变化时，使用新的 `--processed` / `--dataset` 路径；
@@ -71,10 +90,10 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 - 两路图像分别按 header 时间戳，在同一 20 Hz 网格选择不晚于当前时刻的最近帧。
   任一路图像超过 75 ms、关节超过 50 ms 的样本均剔除，并在间断处切分片段。
 - 每路视频保存为 640×480，模型输入缩放到 224×224；视角顺序固定为全局、腕部。
-- 状态是 `base_link` 到 `link6` 的 FK 位置、旋转矩阵前两行的 6D 表示以及吸盘状态，共 10 维。
-- 动作是下一帧（50 ms 后）的测量位姿和吸盘状态，并非录制的控制器目标。
-  模型预测 16 步动作；位置按训练集统计归一化，6D 旋转保持原表示。
-- 这是 `link6` 位姿，不是吸盘 TCP。部署控制器需要使用一致的坐标和动作语义。
+- 状态为 URDF 顺序的 6 个绝对关节角度（弧度）及吸盘状态，共 7 维。
+- 动作为下一帧（50 ms 后）的实测关节角度及吸盘命令状态；并非录制的电机控制目标。
+- 模型预测 16 步动作，关节角度使用训练集 min/max 归一化，吸盘使用 binary 变换。
+- 部署时反归一化角度，吸盘以 0.5 为阈值转换为开关；关节顺序见数据集 `build_report.json`。
 
 ## 一键转换、训练、量化和 QNN ONNX 编译
 
@@ -98,7 +117,7 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 ./run.sh deploy \
   --chipset qualcomm-qcs8275 \
   --task "吸取桌上的物体并放到指定位置" \
-  --dataset ./datasets/episode_pose_dual_labeled \
+  --dataset ./datasets/episode_joint_dual_labeled \
   --work-dir ./exports/workflow \
   --max-steps 10000 \
   --batch-size 1 \
@@ -114,7 +133,7 @@ GitHub 克隆和 FlashAttention wheel 下载统一使用 `https://gh-proxy.org/`
 ```bash
 ./run.sh deploy \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual_labeled \
+  --dataset ./datasets/episode_joint_dual_labeled \
   --chipset qualcomm-qcs8275 \
   --work-dir ./exports/existing_checkpoint
 ```
@@ -146,7 +165,7 @@ bash quantize.sh check
 # 1. 校准全部组件；至少需要 200 个数据集时间步
 bash quantize.sh quantize \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual \
+  --dataset ./datasets/episode_joint_dual \
   --output ./exports/gr00t_quantized \
   --num-samples 100
 
@@ -161,7 +180,7 @@ bash quantize.sh qnn \
 bash quantize.sh bundle \
   --compiled ./exports/gr00t_qnn \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual \
+  --dataset ./datasets/episode_joint_dual \
   --processor /absolute/path/to/matching/processor \
   --output ./exports/gr00t_deployment
 ```
@@ -189,7 +208,7 @@ bash quantize.sh setup
 bash quantize.sh check
 bash quantize.sh quantize \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual \
+  --dataset ./datasets/episode_joint_dual \
   --output ./exports/gr00t_quantized \
   --num-samples 100
 ```
@@ -210,7 +229,7 @@ bash quantize.sh quantize \
 ```bash
 bash quantize.sh onnx \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual \
+  --dataset ./datasets/episode_joint_dual \
   --output ./exports/gr00t_float_onnx
 ```
 
@@ -258,7 +277,7 @@ python prepare_language.py \
 ```bash
 bash quantize.sh quantize \
   --checkpoint ./checkpoint-10000 \
-  --dataset ./datasets/episode_pose_dual_labeled \
+  --dataset ./datasets/episode_joint_dual_labeled \
   --output ./exports/gr00t_quantized \
   --num-samples 100
 
@@ -318,7 +337,7 @@ python preprocessing/prepare_language.py \
 ```bash
 ./run.sh convert \
   --task "吸取桌上的物体并放到指定位置" \
-  --dataset ./datasets/episode_pose_dual_labeled
+  --dataset ./datasets/episode_joint_dual_labeled
 ```
 
 以上指令仅为示例，请按录包实际任务填写。仅补充语言指令不会自动确认时间边界或同步标志。
@@ -334,18 +353,18 @@ python preprocessing/prepare_language.py \
 旧的 37 个录包清单保存在 `configs/episodes.20261022.backup.json`，其中的初始状态确认不适用于新录包。
 需要人工标注时，可复制数据集的 `episodes.source.json` 后编辑，再通过
 `./run.sh convert --manifest configs/episodes.new.json --dataset datasets/episode_pose_reviewed` 指定清单。
-恢复后的数据集位于 `datasets/episode_pose_dual/`。
+恢复后的数据集位于 `datasets/episode_joint_dual/`。
 
 到其他机器验证训练时，无需复制 16 GB 的原始 `datas/` 或 `processed_dual/`；
 复制本项目脚本、`episode_config.py`、`third_party/Isaac-GR00T/` 和
-`datasets/episode_pose_dual/` 即可运行 `check-data` / `smoke`。
+`datasets/episode_joint_dual/` 即可运行 `check-data` / `smoke`。
 若要在目标机器重新执行 `convert`，则需保留原始 `datas/` 和 `processed_dual/`。
 
 修改标注后重建到新路径：
 
 ```bash
-./run.sh convert --task "任务指令" --dataset datasets/episode_pose_dual_labeled
-./run.sh check-data --dataset datasets/episode_pose_dual
+./run.sh convert --task "任务指令" --dataset datasets/episode_joint_dual_labeled
+./run.sh check-data --dataset datasets/episode_joint_dual
 ```
 
 ## 目标 GPU 机器
@@ -356,9 +375,9 @@ python preprocessing/prepare_language.py \
 
 ```bash
 ./run.sh setup-train
-./run.sh check-data --dataset datasets/episode_pose_dual
-./run.sh smoke --dataset datasets/episode_pose_dual --batch-size 1
-./run.sh train --dataset datasets/episode_pose_dual_labeled --batch-size 1 --max-steps 10000
+./run.sh check-data --dataset datasets/episode_joint_dual
+./run.sh smoke --dataset datasets/episode_joint_dual --batch-size 1
+./run.sh train --dataset datasets/episode_joint_dual_labeled --batch-size 1 --max-steps 10000
 ```
 
 `smoke` 运行真实 10 步训练，并检查有限 loss/梯度和检查点保存；允许草稿数据测试连通性。

@@ -12,20 +12,23 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, default=ROOT/'third_party/Isaac-GR00T')
-    parser.add_argument('--dataset', type=Path, default=ROOT/'datasets/episode_pose_dual')
+    parser.add_argument('--dataset', type=Path, default=ROOT/'datasets/episode_joint_dual')
     args = parser.parse_args()
     os.environ.setdefault('NO_ALBUMENTATIONS_UPDATE', '1')
     os.environ.setdefault('USE_TF', '0')
     sys.path[:0] = [str(ROOT), str(args.repo.resolve())]
     import numpy as np
-    from episode_config import EpisodePoseConfig
+    from episode_config import EpisodeJointConfig
     from gr00t.data.dataset import LeRobotSingleDataset
     from gr00t.model.transforms import collate
 
     report = json.loads((args.dataset/'build_report.json').read_text())
     if report.get('camera_names') != ['front', 'wrist']:
         raise ValueError('Expected a front + wrist dataset')
-    config = EpisodePoseConfig()
+    if report.get('action_representation') != 'joint_position_suction':
+        raise ValueError('Expected motor angles + suction dataset')
+    dimension = len(report['joint_names'])+1
+    config = EpisodeJointConfig()
     results = {}
     for split in ('train', 'val'):
         transforms = config.transform()
@@ -50,7 +53,7 @@ def main():
                 sample = transforms.transforms[-1](data)
                 if len(sample['eagle_content']['image_inputs']) != 2:
                     raise ValueError('The vision-language processor did not receive both cameras')
-                for key, shape, active in [('state', (1, 64), 10), ('action', (16, 32), 160)]:
+                for key, shape, active in [('state', (1, 64), dimension), ('action', (16, 32), 16*dimension)]:
                     if sample[key].shape != shape or not np.isfinite(sample[key]).all():
                         raise ValueError(f'Invalid transformed {key}')
                     if int(sample[key+'_mask'].sum()) != active:

@@ -1,4 +1,4 @@
-"""GR00T N1.5: global + wrist images, absolute link6 pose and suction."""
+"""GR00T N1.5: global + wrist images, absolute motor joint angles and suction."""
 import os
 from importlib import import_module
 
@@ -16,10 +16,10 @@ VideoToTensor, VideoResize, VideoToNumpy = _video.VideoToTensor, _video.VideoRes
 GR00TTransform = import_module(f'{_prefix}.model.transforms').GR00TTransform
 
 
-class EpisodePoseConfig(BaseDataConfig):
+class EpisodeJointConfig(BaseDataConfig):
     video_keys = ['video.front', 'video.wrist']
-    state_keys = ['state.ee_position', 'state.ee_rotation', 'state.suction']
-    action_keys = ['action.ee_position', 'action.ee_rotation', 'action.suction']
+    state_keys = ['state.joint_position', 'state.suction']
+    action_keys = ['action.joint_position', 'action.suction']
     language_keys = ['annotation.human.task_description']
     observation_indices = [0]
     action_indices = list(range(16))
@@ -33,7 +33,7 @@ class EpisodePoseConfig(BaseDataConfig):
             StateActionTransform(
                 apply_to=self.state_keys+self.action_keys,
                 normalization_modes={
-                    'state.ee_position': 'min_max', 'action.ee_position': 'min_max',
+                    'state.joint_position': 'min_max', 'action.joint_position': 'min_max',
                     'state.suction': 'binary', 'action.suction': 'binary',
                 },
             ),

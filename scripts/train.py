@@ -31,6 +31,8 @@ def main():
     if subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip() != REVISION:
         raise ValueError('NVIDIA checkout does not match Qualcomm recipe revision')
     report = json.loads((data/'build_report.json').read_text())
+    if report.get('action_representation') != 'joint_position_suction':
+        raise ValueError('Expected motor angles + suction dataset. Rebuild with convert into a new --dataset path.')
     if report.get('camera_names') != ['front', 'wrist']:
         raise ValueError('Training requires both front and wrist cameras. Rerun convert with the dual-camera defaults.')
     if args.allow_draft_smoke and not args.smoke:
@@ -44,7 +46,7 @@ def main():
     steps = 10 if args.smoke else args.max_steps
     cmd = [sys.executable, str(repo/'scripts/gr00t_finetune.py'),
            '--dataset-path', str(data/'train'), '--output-dir', str(out),
-           '--data-config', 'episode_config:EpisodePoseConfig',
+           '--data-config', 'episode_config:EpisodeJointConfig',
            '--embodiment-tag', 'new_embodiment', '--base-model-path', args.base_model,
            '--num-gpus', '1', '--batch-size', str(args.batch_size), '--max-steps', str(steps),
            '--save-steps', str(min(1000, steps)), '--learning-rate', '1e-4',

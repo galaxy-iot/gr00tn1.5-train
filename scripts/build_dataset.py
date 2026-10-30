@@ -18,19 +18,13 @@ from rosbags.highlevel import AnyReader
 
 from process_bags import write_json
 from task_labels import task_text, validate_tasks
+from urdf_fk import ForwardKinematics
 
 CAMERAS = ('front', 'wrist')
 
 
 def causal_indices(times, targets):
     return np.searchsorted(times, targets, side='right')-1
-
-
-def rotation6d(q):
-    # First two ROWS, matching PyTorch3D matrix_to_rotation_6d.
-    x, y, z, w = q
-    return [1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w),
-            2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)]
 
 
 def stats(array):
@@ -106,7 +100,7 @@ def main():
     labels.add_argument('--task', help='Language instruction shared by all recorded bags')
     labels.add_argument('--manifest', type=Path,
                    help='Optional reviewed annotations; otherwise use all processed bags as a draft')
-    p.add_argument('--output', type=Path, default=Path('datasets/episode_pose_dual'))
+    p.add_argument('--output', type=Path, default=Path('datasets/episode_joint_dual'))
     p.add_argument('--allow-draft', action='store_true')
     p.add_argument('--generate-draft-manifest', type=Path,
                    help='Write a full-range, unlabeled manifest from processed reports and exit')
@@ -166,6 +160,11 @@ def main():
         raise ValueError(f'Manifest references {len(missing)} bags absent from {args.processed}: {preview}{suffix}. Generate a matching draft with --generate-draft-manifest PATH, then review it.')
     if not processed_bags:
         raise ValueError(f'No processed bag reports found in {args.processed}')
+    joint_names = ForwardKinematics(args.processed/'robot.urdf', 'base_link', 'link6').joint_names
+    summary = json.loads((args.processed/'summary.json').read_text())
+    if summary.get('joint_order') != joint_names or not joint_names or len(joint_names) > 31:
+        raise ValueError('Processed joint order does not match URDF or exceeds model capacity')
+    dimension = len(joint_names)+1
     args.output.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(args.processed/'robot.urdf', args.output/'robot.urdf')
     (args.output/'episodes.source.json').write_bytes(manifest_bytes)
@@ -194,6 +193,8 @@ def main():
             camera_times = {camera: np.asarray(pq.read_table(source/report['cameras'][camera]['table'])['stamp_ns'],
                                               dtype=np.int64) for camera in CAMERAS}
             suction = pq.read_table(source/'suction.parquet').to_pylist() if (source/'suction.parquet').exists() else []
+            if any(len(j['position']) != len(joint_names) or not np.isfinite(j['position']).all() for j in joints):
+                raise ValueError(f'Invalid motor angles in {name}')
             jt = np.array([j['stamp_ns'] for j in joints], dtype=np.int64)
             for t in (jt, *camera_times.values()):
                 if not len(t):
@@ -226,8 +227,8 @@ def main():
             for run in runs:
                 if len(run) < 18:
                     continue
-                values = np.asarray([joints[ji[k]]['ee_position']+rotation6d(joints[ji[k]]['ee_quaternion_xyzw'])+[float(sv[si[k]])] for k in run], dtype=np.float32)
-                # Action at t is observed absolute link6 pose + commanded suction at t+1/fps.
+                values = np.asarray([joints[ji[k]]['position']+[float(sv[si[k]])] for k in run], dtype=np.float32)
+                # Action at t is observed absolute motor angles + commanded suction at t+1/fps.
                 observation, action = values[:-1], values[1:]
                 selected = run[:-1]
                 ep = len(split_meta[split]); n = len(selected)
@@ -281,10 +282,9 @@ def main():
     if not all(arrays[s]['action'] for s in arrays):
         raise ValueError('Both train and val require usable sequences')
     training_stats = {key: stats(np.concatenate(parts)) for key, parts in arrays['train'].items()}
-    names = ['x', 'y', 'z', 'r00', 'r01', 'r02', 'r10', 'r11', 'r12', 'suction']
-    modalities = {s: {'ee_position': {'start': 0, 'end': 3, 'absolute': True},
-                       'ee_rotation': {'start': 3, 'end': 9, 'absolute': True, 'rotation_type': 'rotation_6d'},
-                       'suction': {'start': 9, 'end': 10, 'absolute': True}}
+    names = joint_names+['suction']
+    modalities = {s: {'joint_position': {'start': 0, 'end': len(joint_names), 'absolute': True},
+                       'suction': {'start': len(joint_names), 'end': dimension, 'absolute': True}}
                   for s in ('state', 'action')}
     modalities.update(video={c: {'original_key': f'observation.images.{c}'} for c in CAMERAS},
                       annotation={'human.task_description': {}})
@@ -297,23 +297,22 @@ def main():
         (meta/'tasks.jsonl').write_text(''.join(json.dumps({'task_index': i, 'task': t}, ensure_ascii=False)+'\n' for i, t in enumerate(tasks)))
         write_json(meta/'modality.json', modalities)
         write_json(meta/'stats.json', training_stats)  # Never fit normalization on validation data.
-        features = {k: {'dtype': 'float32', 'shape': [10], 'names': names} for k in ('observation.state', 'action')}
+        features = {k: {'dtype': 'float32', 'shape': [dimension], 'names': names} for k in ('observation.state', 'action')}
         for camera in CAMERAS:
             features[f'observation.images.{camera}'] = {'dtype': 'video', 'shape': [480, 640, 3], 'names': ['height', 'width', 'channel'],
                 'video_info': {'video.fps': args.fps, 'video.codec': 'h264', 'video.pix_fmt': 'yuv420p', 'video.is_depth_map': False, 'has_audio': False}}
         for k in ('frame_index', 'episode_index', 'index', 'task_index', 'annotation.human.task_description'):
             features[k] = {'dtype': 'int64', 'shape': [1]}
         features['timestamp'] = {'dtype': 'float64', 'shape': [1]}
-        write_json(meta/'info.json', {'codebase_version': 'v2.0', 'robot_type': 'episode_arm_link6',
+        write_json(meta/'info.json', {'codebase_version': 'v2.0', 'robot_type': 'episode_arm_joint',
             'total_episodes': len(split_meta[split]), 'total_frames': counters[split], 'total_tasks': len(tasks),
             'total_videos': len(split_meta[split])*len(CAMERAS), 'total_chunks': 1, 'chunks_size': 1000,
             'fps': args.fps, 'splits': {split: f'0:{len(split_meta[split])}'},
             'data_path': 'data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet',
             'video_path': 'videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4', 'features': features})
     write_json(args.output/'build_report.json', {'ready_for_training': ready, 'fps': args.fps, 'camera_names': list(CAMERAS),
-        'split_frames': counters, 'episodes': provenance, 'pose': 'base_link -> link6, NOT suction TCP',
-        'action_semantics': f'future measured absolute FK pose and commanded suction, +{1/args.fps}s; NOT recorded control target',
-        'rotation6d': 'first two rotation matrix rows, row-major; Gram-Schmidt required at inference',
+        'split_frames': counters, 'episodes': provenance, 'action_representation': 'joint_position_suction', 'joint_names': joint_names, 'joint_unit': 'radian',
+        'action_semantics': f'future measured absolute motor joint angles and commanded suction, +{1/args.fps}s; NOT recorded control target',
         'clock_policy': 'image and joint header stamps, Bool bag receive time; image offset only if explicitly configured',
         'statistics': 'fit on train only; copied unchanged to val',
         'source_manifest_sha256': __import__('hashlib').sha256(manifest_bytes).hexdigest()})

@@ -120,6 +120,8 @@ class Pipeline:
             if not report_path.is_file():
                 raise ValueError(f'Incomplete dataset directory: {a.dataset}. Existing outputs were kept; choose a new --dataset path to rebuild.')
             report = json.loads(report_path.read_text())
+            if report.get('action_representation') != 'joint_position_suction':
+                raise ValueError('Expected motor angles + suction dataset. Rebuild with convert into a new --dataset path.')
             if report.get('camera_names') != ['front', 'wrist']:
                 raise ValueError('Dataset lacks dual cameras. Choose a new --dataset path and rerun convert.')
             if a.manifest and report['source_manifest_sha256'] != hashlib.sha256(a.manifest.read_bytes()).hexdigest():

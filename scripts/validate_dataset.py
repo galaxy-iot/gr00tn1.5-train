@@ -21,6 +21,8 @@ def main():
     args = p.parse_args()
     report = json.loads((args.dataset/'build_report.json').read_text())
     cameras = report.get('camera_names', ['front'])
+    require(report.get('action_representation') == 'joint_position_suction', 'Expected motor angles + suction dataset; rebuild into a new directory')
+    dimension = len(report['joint_names'])+1
     period = 10**9//report['fps']
     arrays = {'observation.state': [], 'action': []}
     result = {}
@@ -39,7 +41,7 @@ def main():
             obs = np.asarray(table['observation.state']); action = np.asarray(table['action'])
             n = len(obs)
             require(n == e['length'], 'Episode length mismatch')
-            require(obs.shape == (n, 10) and action.shape == (n, 10), 'Invalid dimensions')
+            require(obs.shape == (n, dimension) and action.shape == (n, dimension), 'Invalid dimensions')
             require(np.isfinite(obs).all() and np.isfinite(action).all(), 'Nonfinite values')
             require(np.allclose(action[:-1], obs[1:]), 'Future feedback labels are misaligned')
             times = np.array(table['source_timestamp_ns'], dtype=np.int64)
@@ -51,10 +53,8 @@ def main():
                 age = times-np.array(table[name], dtype=np.int64)
                 require(np.all((age >= 0) & (age <= limit)), 'Stale/future observation')
             for values in (obs, action):
-                require(np.isin(values[:, 9], [0, 1]).all(), 'Invalid suction values')
-                rows = values[:, 3:9].reshape(-1, 2, 3)
-                require(np.allclose(np.linalg.norm(rows, axis=2), 1, atol=1e-5), 'Invalid 6D rotation rows')
-                require(np.allclose(np.sum(rows[:, 0]*rows[:, 1], axis=1), 0, atol=1e-5), 'Nonorthogonal rotation rows')
+                require(np.isin(values[:, -1], [0, 1]).all(), 'Invalid suction values')
+            require(np.allclose(obs[:, :-1], table['joint_positions']), 'State differs from motor feedback')
             for camera in cameras:
                 video = args.dataset/split/f'videos/chunk-000/observation.images.{camera}'/f'episode_{ep:06d}.mp4'
                 with av.open(str(video)) as container:

@@ -32,7 +32,7 @@ def parse_args(argv=None):
     snapshot = ROOT/'processed_dual/robot.urdf'
     data.add_argument('--urdf', type=Path, default=snapshot if snapshot.is_file() else
                    ROOT/'episode1_urdf_1113.urdf')
-    data.add_argument('--dataset', type=Path, default=ROOT/'datasets/episode_pose_dual')
+    data.add_argument('--dataset', type=Path, default=ROOT/'datasets/episode_joint_dual')
     training = p.add_argument_group('Training')
     training.add_argument('--output', type=Path)
     training.add_argument('--batch-size', type=int, default=1)
